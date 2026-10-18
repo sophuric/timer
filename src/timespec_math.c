@@ -1,5 +1,7 @@
 #include "timespec_math.h"
 
+#include <stdio.h>
+
 int compare_timespec(struct timespec a, struct timespec b) {
 	if (a.tv_sec > b.tv_sec) return 1;
 	if (a.tv_sec < b.tv_sec) return -1;

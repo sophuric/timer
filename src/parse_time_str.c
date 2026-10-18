@@ -17,6 +17,8 @@ bool parse_time_str(const char *str, struct timespec *out, bool *is_relative) {
 		*is_relative = false;
 	}
 
+	date_now.tv_sec += 10; // 10 seconds in the future, for testing
+
 	*out = date_now;
 	return true;
 }

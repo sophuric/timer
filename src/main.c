@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <time.h>
+#include <sys/time.h>
+#include <stdint.h>
 #include <string.h>
 #include <errno.h>
 #include <signal.h>
@@ -13,12 +15,16 @@
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 
-
 static void handle_signal(int signal);
 struct display_state display = {.fd = STDERR_FILENO};
 
-static bool do_exit = false, do_suspend = false;
+static bool do_exit = false, do_suspend = false, do_redraw = false;
 static int exit_code = 1;
+static struct itimerval itimer = {
+        .it_interval = {.tv_sec = 0, .tv_usec = 0},
+};
+
+#define TIMER_PRECISION_USEC (1000000)
 
 int main(int argc, char *argv[]) {
 	bool invalid = false;
@@ -94,7 +100,8 @@ int main(int argc, char *argv[]) {
 	if (compare_timespec(date_now, target_date) >= 0) keep_going = true;
 
 	// remaining/elapsed time when paused
-	bool paused, diff_after_target;
+	bool paused = false;
+	int diff_cmp;
 	struct timespec diff_time;
 
 	// handle exit
@@ -114,6 +121,16 @@ int main(int argc, char *argv[]) {
 
 	if (!set_display(&display, true)) return 1;
 
+#define ERROR(code, ...)              \
+	{                                 \
+		set_display(&display, false); \
+		eprintf(__VA_ARGS__);         \
+		exit_code = code;             \
+		goto exit;                    \
+	}
+
+	do_redraw = true;
+
 	// main loop
 	while (true) {
 		if (do_suspend) {
@@ -121,32 +138,56 @@ int main(int argc, char *argv[]) {
 			raise(SIGSTOP);                              // suspend process
 			if (!set_display(&display, true)) return 1;  // return back to timer display
 			do_suspend = false;
+			do_redraw = true;
 		} else if (do_exit) {
 			goto exit;
 		}
 
 		if (!paused) {
 			if (clock_gettime(CLOCK_REALTIME, &date_now) == -1) {
-				set_display(&display, false);
-				eprintf("clock_gettime: %s\n", strerror(errno));
-				return 1;
+				ERROR(1, "clock_gettime: %s\n", strerror(errno));
 			}
-			diff_after_target = compare_timespec(date_now, target_date);
+			diff_cmp = compare_timespec(date_now, target_date);
 			diff_time = subtract_timespec(date_now, target_date);
 		}
 
+		/*
 		if (!paused) {
 			// pause
 			paused = true;
 		} else {
 			// resume
-			target_date = diff_after_target ? add_timespec(date_now, diff_time) : subtract_timespec(date_now, diff_time);
+			target_date = diff_cmp < 0 ? add_timespec(date_now, diff_time) : subtract_timespec(date_now, diff_time);
 			paused = false;
 		}
+		*/
 
-		struct tm *timeinfo;
-		timeinfo = localtime(&date_now.tv_sec);
-		printf("Current local time and date: %s", asctime(timeinfo));
+		if (do_redraw) {
+			// abort itimer
+			itimer.it_value.tv_sec = 0;
+			itimer.it_value.tv_usec = 0;
+			if (setitimer(ITIMER_REAL, &itimer, NULL) != 0) {
+				ERROR(1, "setitimer: %s\n", strerror(errno));
+			}
+
+			struct tm *timeinfo;
+			timeinfo = localtime(&date_now.tv_sec);
+			printf("Paused: %s - diff: %03i.%09i\n", paused ? "true" : "false", diff_time.tv_sec, diff_time.tv_nsec);
+			do_redraw = false;
+
+			// if (!paused) {
+			itimer.it_value.tv_usec = (diff_time.tv_nsec / 1000) % TIMER_PRECISION_USEC;                // the time until the next multiple of TIMER_PRECISION_USEC
+			if (diff_cmp > 0) itimer.it_value.tv_usec = TIMER_PRECISION_USEC - itimer.it_value.tv_usec; // negate depending if we're counting down or up
+			if (itimer.it_value.tv_usec <= 0) itimer.it_value.tv_usec = 1;                              // just in case
+
+			// redraw after TIMER_PRECISION_USEC has elapsed
+			if (setitimer(ITIMER_REAL, &itimer, NULL) != 0) {
+				ERROR(1, "setitimer: %s\n", strerror(errno));
+			}
+			// }
+
+			do_redraw = false;
+		}
 	}
 
 	exit_code = 0;
@@ -156,11 +197,12 @@ exit:
 }
 
 static void handle_signal(int signal) {
-	printf("resume\n");
 	switch (signal) {
-		case SIGWINCH:
+		case SIGWINCH: // from resizing window
+		case SIGALRM:  // from setitimer
+			do_redraw = true;
 			break;
-		case SIGTSTP:
+		case SIGTSTP: // ctrl+Z suspend process
 		case SIGTTIN:
 		case SIGTTOU:
 			do_suspend = true;
