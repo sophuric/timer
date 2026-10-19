@@ -28,15 +28,16 @@ static struct itimerval itimer = {
 
 int main(int argc, char *argv[]) {
 	bool invalid = false;
-	bool keep_going = false, allow_pause = false, disallow_pause = false;
+	bool keep_going = false, allow_pause = false, disallow_pause = false, paused = false;
 
 	// argument handling
-	for (int opt; (opt = getopt_long(argc, argv, ":hVk", (struct option[]) {
+	for (int opt; (opt = getopt_long(argc, argv, ":hVkpPd", (struct option[]) {
 	                                                             {"help",           no_argument, 0, 'h'},
 	                                                             {"version",        no_argument, 0, 'V'},
 	                                                             {"keep-going",     no_argument, 0, 'k'},
 	                                                             {"allow-pause",    no_argument, 0, 'p'},
 	                                                             {"disallow-pause", no_argument, 0, 'P'},
+	                                                             {"start-paused",   no_argument, 0, 'd'},
 	                                                             {0,                0,           0, 0  }
     },
 	                                 NULL)) != -1;) {
@@ -48,7 +49,8 @@ int main(int argc, char *argv[]) {
 				       "-h --help: Shows help text\n"
 				       "-k --keep-going: Don't exit after count down expires\n"
 				       "-p --allow-pause: Allow pausing for allow times (e.g. 17:23) too as well as relative times (e.g. in 42 minutes)\n"
-				       "-P --disallow-pause: Prevent pausing regardless of how the target time is specified, has priority over -p");
+				       "-P --disallow-pause: Prevent pausing regardless of how the target time is specified, has priority over -p\n"
+				       "-d --start-paused: Start the timer paused\n");
 				return 0;
 			default:
 				if (invalid) break;
@@ -62,9 +64,11 @@ int main(int argc, char *argv[]) {
 					case 'P':
 						disallow_pause = true;
 						break;
+					case 'd':
+						paused = true;
+						break;
 					default:
 						invalid = true;
-						break;
 				}
 				break;
 		}
@@ -97,10 +101,9 @@ int main(int argc, char *argv[]) {
 	}
 
 	// don't quit after passing the target time, if the target time is in the past
-	if (compare_timespec(date_now, target_date) >= 0) keep_going = true;
+	if (!keep_going && compare_timespec(date_now, target_date) >= 0) keep_going = true;
 
 	// remaining/elapsed time when paused
-	bool paused = false;
 	int diff_cmp;
 	struct timespec diff_time;
 
@@ -149,6 +152,12 @@ int main(int argc, char *argv[]) {
 			}
 			diff_cmp = compare_timespec(date_now, target_date);
 			diff_time = subtract_timespec(date_now, target_date);
+
+			// exit if timer has expired
+			if (compare_timespec(date_now, target_date) >= 0 && !keep_going) {
+				exit_code = 0;
+				do_exit = true;
+			}
 		}
 
 		/*
@@ -175,16 +184,16 @@ int main(int argc, char *argv[]) {
 			printf("Paused: %s - diff: %03i.%09i\n", paused ? "true" : "false", diff_time.tv_sec, diff_time.tv_nsec);
 			do_redraw = false;
 
-			// if (!paused) {
-			itimer.it_value.tv_usec = (diff_time.tv_nsec / 1000) % TIMER_PRECISION_USEC;                // the time until the next multiple of TIMER_PRECISION_USEC
-			if (diff_cmp > 0) itimer.it_value.tv_usec = TIMER_PRECISION_USEC - itimer.it_value.tv_usec; // negate depending if we're counting down or up
-			if (itimer.it_value.tv_usec <= 0) itimer.it_value.tv_usec = 1;                              // just in case
+			if (!paused) {
+				itimer.it_value.tv_usec = (diff_time.tv_nsec / 1000) % TIMER_PRECISION_USEC;                // the time until the next multiple of TIMER_PRECISION_USEC
+				if (diff_cmp > 0) itimer.it_value.tv_usec = TIMER_PRECISION_USEC - itimer.it_value.tv_usec; // negate depending if we're counting down or up
+				if (itimer.it_value.tv_usec <= 0) itimer.it_value.tv_usec = 1;                              // just in case
 
-			// redraw after TIMER_PRECISION_USEC has elapsed
-			if (setitimer(ITIMER_REAL, &itimer, NULL) != 0) {
-				ERROR(1, "setitimer: %s\n", strerror(errno));
+				// redraw after TIMER_PRECISION_USEC has elapsed
+				if (setitimer(ITIMER_REAL, &itimer, NULL) != 0) {
+					ERROR(1, "setitimer: %s\n", strerror(errno));
+				}
 			}
-			// }
 
 			do_redraw = false;
 		}
