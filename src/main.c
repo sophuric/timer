@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <poll.h>
 #include <getopt.h>
 #include <time.h>
 #include <sys/time.h>
@@ -18,7 +19,7 @@
 static void handle_signal(int signal);
 struct display_state display = {.fd = STDERR_FILENO};
 
-static bool do_exit = false, do_suspend = false, do_redraw = false;
+static bool do_exit = false, do_suspend = false, do_redraw = false, do_toggle_pause = false, do_pause = false;
 static int exit_code = 1;
 static struct itimerval itimer = {
         .it_interval = {.tv_sec = 0, .tv_usec = 0},
@@ -32,25 +33,33 @@ int main(int argc, char *argv[]) {
 
 	// argument handling
 	for (int opt; (opt = getopt_long(argc, argv, ":hVkpPd", (struct option[]) {
-	                                                             {"help",           no_argument, 0, 'h'},
-	                                                             {"version",        no_argument, 0, 'V'},
-	                                                             {"keep-going",     no_argument, 0, 'k'},
-	                                                             {"allow-pause",    no_argument, 0, 'p'},
-	                                                             {"disallow-pause", no_argument, 0, 'P'},
-	                                                             {"start-paused",   no_argument, 0, 'd'},
-	                                                             {0,                0,           0, 0  }
+	                                                                {"help",           no_argument, 0, 'h'},
+	                                                                {"version",        no_argument, 0, 'V'},
+	                                                                {"keep-going",     no_argument, 0, 'k'},
+	                                                                {"allow-pause",    no_argument, 0, 'p'},
+	                                                                {"disallow-pause", no_argument, 0, 'P'},
+	                                                                {"start-paused",   no_argument, 0, 'd'},
+	                                                                {0,                0,           0, 0  }
     },
 	                                 NULL)) != -1;) {
 		switch (opt) {
 			case 'h':
 				printf("Usage: %s [OPTION] <target time>...\n", argv[0]);
-				printf("target time: see DATE STRING in date(1), or info '(coreutils) Date input formats'\n"
+				printf("\n"
+				       "target time: see DATE STRING in date(1), or info '(coreutils) Date input formats'\n"
 				       "Counts down if the target time is in the future, counts up if the time is in the past\n"
+				       "\n"
 				       "-h --help: Shows help text\n"
 				       "-k --keep-going: Don't exit after count down expires\n"
 				       "-p --allow-pause: Allow pausing for allow times (e.g. 17:23) too as well as relative times (e.g. in 42 minutes)\n"
 				       "-P --disallow-pause: Prevent pausing regardless of how the target time is specified, has priority over -p\n"
-				       "-d --start-paused: Start the timer paused\n");
+				       "-d --start-paused: Start the timer paused\n"
+				       "\n"
+				       "Signals:\n"
+				       "SIGUSR1: pauses the timer if it is active\n"
+				       "SIGUSR2: toggles pause/resume\n"
+				       "Not affected by -P\n"
+				       "\n");
 				return 0;
 			default:
 				if (invalid) break;
@@ -122,7 +131,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if (!set_display(&display, true)) return 1;
+	if (!set_display(&display, true)) return 5;
 
 #define ERROR(code, ...)              \
 	{                                 \
@@ -135,11 +144,11 @@ int main(int argc, char *argv[]) {
 	do_redraw = true;
 
 	// main loop
-	while (true) {
+	for (bool first;; first = false) {
 		if (do_suspend) {
-			if (!set_display(&display, false)) return 1; // return to normal display
+			if (!set_display(&display, false)) return 5; // return to normal display
 			raise(SIGSTOP);                              // suspend process
-			if (!set_display(&display, true)) return 1;  // return back to timer display
+			if (!set_display(&display, true)) return 5;  // return back to timer display
 			do_suspend = false;
 			do_redraw = true;
 		} else if (do_exit) {
@@ -147,9 +156,8 @@ int main(int argc, char *argv[]) {
 		}
 
 		if (!paused) {
-			if (clock_gettime(CLOCK_REALTIME, &date_now) == -1) {
+			if (clock_gettime(CLOCK_REALTIME, &date_now) == -1)
 				ERROR(1, "clock_gettime: %s\n", strerror(errno));
-			}
 			diff_cmp = compare_timespec(date_now, target_date);
 			diff_time = subtract_timespec(date_now, target_date);
 
@@ -160,28 +168,54 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
-		/*
-		if (!paused) {
-			// pause
-			paused = true;
-		} else {
-			// resume
-			target_date = diff_cmp < 0 ? add_timespec(date_now, diff_time) : subtract_timespec(date_now, diff_time);
-			paused = false;
+		// input
+		bool no_input = first; // consume any buffered input at the start of the program
+		while (true) {
+			struct pollfd pollfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
+			int poll_res = poll(&pollfd, 1, 0);
+			if (poll_res <= 0) break;
+			if (poll_res == -1)
+				ERROR(1, "poll: %s\n", strerror(errno));
+
+			if (feof(stdin)) break;
+			if (ferror(stdin)) ERROR(6, "Error in stdin\n");
+
+			int c = fgetc(stdin);
+			if (no_input) continue;
+			switch (c) {
+				case ' ':
+					if (allow_pause) do_toggle_pause = true;
+					break;
+			}
 		}
-		*/
+
+		if (do_toggle_pause || do_pause) {
+			if (paused && do_toggle_pause) {
+				// resume
+				if (clock_gettime(CLOCK_REALTIME, &date_now) == -1)
+					ERROR(1, "clock_gettime: %s\n", strerror(errno));
+				target_date = diff_cmp < 0 ? add_timespec(date_now, diff_time) : subtract_timespec(date_now, diff_time);
+				paused = false;
+				do_redraw = true;
+			} else if (!paused) {
+				// pause
+				paused = true;
+				do_redraw = true;
+			}
+			do_toggle_pause = false;
+			do_pause = false;
+		}
 
 		if (do_redraw) {
 			// abort itimer
 			itimer.it_value.tv_sec = 0;
 			itimer.it_value.tv_usec = 0;
-			if (setitimer(ITIMER_REAL, &itimer, NULL) != 0) {
+			if (setitimer(ITIMER_REAL, &itimer, NULL) != 0)
 				ERROR(1, "setitimer: %s\n", strerror(errno));
-			}
 
 			struct tm *timeinfo;
 			timeinfo = localtime(&date_now.tv_sec);
-			printf("Paused: %s - diff: %03i.%09i\n", paused ? "true" : "false", diff_time.tv_sec, diff_time.tv_nsec);
+			printf("Paused: %s - diff: %03i.%09i\r\n", paused ? "true" : "false", diff_time.tv_sec, diff_time.tv_nsec);
 			do_redraw = false;
 
 			if (!paused) {
@@ -190,9 +224,8 @@ int main(int argc, char *argv[]) {
 				if (itimer.it_value.tv_usec <= 0) itimer.it_value.tv_usec = 1;                              // just in case
 
 				// redraw after TIMER_PRECISION_USEC has elapsed
-				if (setitimer(ITIMER_REAL, &itimer, NULL) != 0) {
+				if (setitimer(ITIMER_REAL, &itimer, NULL) != 0)
 					ERROR(1, "setitimer: %s\n", strerror(errno));
-				}
 			}
 
 			do_redraw = false;
@@ -201,7 +234,7 @@ int main(int argc, char *argv[]) {
 
 	exit_code = 0;
 exit:
-	set_display(&display, false);
+	if (!set_display(&display, false) && exit_code == 0) return 5;
 	return exit_code;
 }
 
@@ -215,6 +248,12 @@ static void handle_signal(int signal) {
 		case SIGTTIN:
 		case SIGTTOU:
 			do_suspend = true;
+			break;
+		case SIGUSR1:
+			do_pause = true;
+			break;
+		case SIGUSR2:
+			do_toggle_pause = true;
 			break;
 		default:
 			do_exit = true;
