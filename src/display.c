@@ -32,7 +32,7 @@ bool set_display(struct display_state *state, bool enabled) {
 	}
 
 	// set new termios
-	if (tcsetattr(state->fd, TCSANOW, &state->prev_termios) != 0) {
+	if (tcsetattr(state->fd, TCSANOW, &new) != 0) {
 		dsprintf("tcsetattr: %s\n", strerror(errno));
 		return false;
 	}
