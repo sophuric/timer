@@ -4,6 +4,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <signal.h>
@@ -29,17 +30,19 @@ static struct itimerval itimer = {
 
 int main(int argc, char *argv[]) {
 	bool invalid = false;
-	bool keep_going = false, allow_pause = false, disallow_pause = false, paused = false;
+	bool keep_going = false, allow_control = false, disallow_control = false, paused = false;
+	char *expire_command = NULL;
 
 	// argument handling
-	for (int opt; (opt = getopt_long(argc, argv, ":hVkpPd", (struct option[]) {
-	                                                                {"help",           no_argument, 0, 'h'},
-	                                                                {"version",        no_argument, 0, 'V'},
-	                                                                {"keep-going",     no_argument, 0, 'k'},
-	                                                                {"allow-pause",    no_argument, 0, 'p'},
-	                                                                {"disallow-pause", no_argument, 0, 'P'},
-	                                                                {"start-paused",   no_argument, 0, 'd'},
-	                                                                {0,                0,           0, 0  }
+	for (int opt; (opt = getopt_long(argc, argv, ":hVkpPdc:", (struct option[]) {
+	                                                                  {"help",           no_argument,       0, 'h'},
+	                                                                  {"version",        no_argument,       0, 'V'},
+	                                                                  {"keep-going",     no_argument,       0, 'k'},
+	                                                                  {"allow-pause",    no_argument,       0, 'p'},
+	                                                                  {"disallow-pause", no_argument,       0, 'P'},
+	                                                                  {"start-paused",   no_argument,       0, 'd'},
+	                                                                  {"command",        required_argument, 0, 'c'},
+	                                                                  {0,                0,                 0, 0  }
     },
 	                                 NULL)) != -1;) {
 		switch (opt) {
@@ -51,14 +54,26 @@ int main(int argc, char *argv[]) {
 				       "\n"
 				       "-h --help: Shows help text\n"
 				       "-k --keep-going: Don't exit after count down expires\n"
-				       "-p --allow-pause: Allow pausing for allow times (e.g. 17:23) too as well as relative times (e.g. in 42 minutes)\n"
-				       "-P --disallow-pause: Prevent pausing regardless of how the target time is specified, has priority over -p\n"
+				       "-p --allow-control: Allow pausing for allow times (e.g. 17:23) too as well as relative times (e.g. in 42 minutes)\n"
+				       "-P --disallow-control: Prevent pausing regardless of how the target time is specified, has priority over -p\n"
 				       "-d --start-paused: Start the timer paused\n"
+				       "-c --command <command>: Run shell command when countdown hits zero\n"
 				       "\n"
 				       "Signals:\n"
 				       "SIGUSR1: pauses the timer if it is active\n"
 				       "SIGUSR2: toggles pause/resume\n"
 				       "Not affected by -P\n"
+				       "\n"
+				       "Keybinds:\n"
+				       "space: toggle pause/resume\n"
+				       "q: quit\n"
+				       "f: toggle stopwatch/countdown\n"
+				       "+/k: add 1 second\n"
+				       "i: add 10 seconds\n"
+				       "m: add 60 seconds\n"
+				       "-/j: subtract 1 second\n"
+				       "u: subtract 10 seconds\n"
+				       "n: subtract 60 seconds\n"
 				       "\n");
 				return 0;
 			default:
@@ -68,13 +83,16 @@ int main(int argc, char *argv[]) {
 						keep_going = true;
 						break;
 					case 'p':
-						allow_pause = true;
+						allow_control = true;
 						break;
 					case 'P':
-						disallow_pause = true;
+						disallow_control = true;
 						break;
 					case 'd':
 						paused = true;
+						break;
+					case 'c':
+						expire_command = optarg;
 						break;
 					default:
 						invalid = true;
@@ -98,10 +116,10 @@ int main(int argc, char *argv[]) {
 		return 3;
 	}
 
-	if (disallow_pause)
-		allow_pause = false;
+	if (disallow_control)
+		allow_control = false;
 	else if (is_relative)
-		allow_pause = true;
+		allow_control = true;
 
 	struct timespec date_now;
 	if (clock_gettime(CLOCK_REALTIME, &date_now) == -1) {
@@ -109,16 +127,10 @@ int main(int argc, char *argv[]) {
 		return 4;
 	}
 
-	// don't quit after passing the target time, if the target time is in the past
-	if (!keep_going && compare_timespec(date_now, target_date) >= 0) keep_going = true;
-
-	// remaining/elapsed time when paused
-	int diff_cmp;
-	struct timespec diff_time;
-
 	// handle exit
 	for (int sig = 1; sig < NSIG; ++sig) {
 		switch (sig) {
+			// don't need to handle these signals
 			case SIGTRAP:
 			case SIGCHLD:
 			case SIGURG:
@@ -143,6 +155,10 @@ int main(int argc, char *argv[]) {
 
 	do_redraw = true;
 
+	// remaining/elapsed time when paused
+	int diff_cmp = -2, prev_diff_cmp;
+	struct timespec diff_time;
+
 	// main loop
 	for (bool first;; first = false) {
 		if (do_suspend) {
@@ -151,6 +167,10 @@ int main(int argc, char *argv[]) {
 			if (!set_display(&display, true)) return 5;  // return back to timer display
 			do_suspend = false;
 			do_redraw = true;
+			// pause, and resume when program continued
+			paused = true;
+			do_pause = false;
+			do_toggle_pause = true;
 		} else if (do_exit) {
 			goto exit;
 		}
@@ -158,13 +178,32 @@ int main(int argc, char *argv[]) {
 		if (!paused) {
 			if (clock_gettime(CLOCK_REALTIME, &date_now) == -1)
 				ERROR(1, "clock_gettime: %s\n", strerror(errno));
+			prev_diff_cmp = diff_cmp;
 			diff_cmp = compare_timespec(date_now, target_date);
 			diff_time = subtract_timespec(date_now, target_date);
+			if (prev_diff_cmp == -2) prev_diff_cmp = diff_cmp;
 
-			// exit if timer has expired
-			if (compare_timespec(date_now, target_date) >= 0 && !keep_going) {
-				exit_code = 0;
-				do_exit = true;
+			// detect when countdown hits zero
+			if (diff_cmp >= 0 && prev_diff_cmp < 0) {
+				if (expire_command) {
+					// run command
+					if (!set_display(&display, false)) return 5;
+					int system_res = system(expire_command);
+					if (system_res == -1)
+						ERROR(1, "system: %s: %s\n", expire_command, strerror(errno));
+					if (!keep_going) {
+						// exit after expiring, setting exit code to the program's exit code
+						exit_code = system_res;
+						goto exit;
+					}
+					// TODO: fix bug where setitimer doesn't work after this
+					if (!set_display(&display, true)) return 5;
+				}
+				if (!keep_going) {
+					// exit unless specified otherwise
+					exit_code = 0;
+					goto exit;
+				}
 			}
 		}
 
@@ -182,10 +221,48 @@ int main(int argc, char *argv[]) {
 
 			int c = fgetc(stdin);
 			if (no_input) continue;
-			switch (c) {
-				case ' ':
-					if (allow_pause) do_toggle_pause = true;
-					break;
+			if (c == 'q') {
+				// quit
+				exit_code = 0;
+				goto exit;
+			}
+			if (allow_control) {
+				switch (c) {
+					case 'q':
+					case ' ':
+						do_toggle_pause = true;
+						goto no_set;
+					case 'f':
+						// toggle stopwatch/countdown
+						diff_cmp = -diff_cmp;
+						break;
+					case '+':
+					case 'k':
+						diff_time = add_timespec(diff_time, TIMESPEC(1, 0));
+						break;
+					case 'i':
+						diff_time = add_timespec(diff_time, TIMESPEC(10, 0));
+						break;
+					case 'm':
+						diff_time = add_timespec(diff_time, TIMESPEC(60, 0));
+						break;
+					case '-':
+					case 'j':
+						diff_time = subtract_timespec_zero(diff_time, TIMESPEC(1, 0));
+						break;
+					case 'u':
+						diff_time = subtract_timespec_zero(diff_time, TIMESPEC(10, 0));
+						break;
+					case 'n':
+						diff_time = subtract_timespec_zero(diff_time, TIMESPEC(60, 0));
+						break;
+					default:
+						goto no_set;
+				}
+				// set new target date
+				target_date = diff_cmp < 0 ? add_timespec(date_now, diff_time) : subtract_timespec(date_now, diff_time);
+				do_redraw = true;
+			no_set:
 			}
 		}
 
@@ -215,7 +292,7 @@ int main(int argc, char *argv[]) {
 
 			struct tm *timeinfo;
 			timeinfo = localtime(&date_now.tv_sec);
-			printf("Paused: %s - diff: %03i.%09i\r\n", paused ? "true" : "false", diff_time.tv_sec, diff_time.tv_nsec);
+			printf("%s - diff: %03i.%09i - counting %s\r\n", paused ? "paused" : "active", diff_time.tv_sec, diff_time.tv_nsec, diff_cmp > 0 ? "up" : "down");
 			do_redraw = false;
 
 			if (!paused) {
@@ -256,6 +333,7 @@ static void handle_signal(int signal) {
 			do_toggle_pause = true;
 			break;
 		default:
+			// every other signal exits the program
 			do_exit = true;
 			exit_code = signal == SIGINT ? 0 : 1;
 	}

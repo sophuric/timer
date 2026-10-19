@@ -4,4 +4,6 @@
 int compare_timespec(struct timespec a, struct timespec b);
 struct timespec add_timespec(struct timespec a, struct timespec b);
 struct timespec subtract_timespec(struct timespec a, struct timespec b);
+struct timespec subtract_timespec_zero(struct timespec a, struct timespec b);
+#define TIMESPEC(sec, nsec) ((struct timespec) {.tv_sec = sec, .tv_nsec = nsec})
 #endif

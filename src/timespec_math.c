@@ -40,3 +40,8 @@ struct timespec subtract_timespec(struct timespec a, struct timespec b) {
 	}
 	return res;
 }
+struct timespec subtract_timespec_zero(struct timespec a, struct timespec b) {
+	// subtract, but instead return zero if it goes negative
+	if (compare_timespec(a, b) > 0) return subtract_timespec(a, b);
+	return TIMESPEC(0, 0);
+}
