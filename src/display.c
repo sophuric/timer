@@ -6,6 +6,8 @@
 
 #define dsprintf(...) dprintf(state->fd, __VA_ARGS__)
 
+#define DEBUG_DISPLAY
+
 bool set_display(struct display_state *state, bool enabled) {
 	if (enabled == state->enabled) return true;
 
@@ -16,6 +18,7 @@ bool set_display(struct display_state *state, bool enabled) {
 			return false;
 		}
 
+#ifndef DEBUG_DISPLAY
 	if (!enabled) // disable
 		dsprintf(
 		        "\x1b[H"      // move to start
@@ -24,6 +27,7 @@ bool set_display(struct display_state *state, bool enabled) {
 		        "\x1b[?7h"    // re-enable newline at end of line
 		        "\x1b[?1049l" // restore buffer
 		);
+#endif
 
 	struct termios new = state->prev_termios;
 	if (enabled) {
@@ -37,12 +41,14 @@ bool set_display(struct display_state *state, bool enabled) {
 		return false;
 	}
 
+#ifndef DEBUG_DISPLAY
 	if (enabled) // enable
 		dsprintf(
 		        "\x1b[?1049h" // move to separate buffer
 		        "\x1b[?7l"    // disable newline at end of line
 		        "\x1b[?25l"   // hide cursor
 		);
+#endif
 
 	state->enabled = enabled;
 

@@ -159,18 +159,19 @@ int main(int argc, char *argv[]) {
 	int diff_cmp = -2, prev_diff_cmp;
 	struct timespec diff_time;
 
+	bool no_input = true;
+
 	// main loop
-	for (bool first;; first = false) {
+	while (true) {
+		bool recalculate_time = false;
 		if (do_suspend) {
 			if (!set_display(&display, false)) return 5; // return to normal display
 			raise(SIGSTOP);                              // suspend process
 			if (!set_display(&display, true)) return 5;  // return back to timer display
 			do_suspend = false;
 			do_redraw = true;
-			// pause, and resume when program continued
-			paused = true;
-			do_pause = false;
-			do_toggle_pause = true;
+			recalculate_time = true;
+			no_input = true;
 		} else if (do_exit) {
 			goto exit;
 		}
@@ -196,8 +197,9 @@ int main(int argc, char *argv[]) {
 						exit_code = system_res;
 						goto exit;
 					}
-					// TODO: fix bug where setitimer doesn't work after this
 					if (!set_display(&display, true)) return 5;
+					recalculate_time = true;
+					no_input = true;
 				}
 				if (!keep_going) {
 					// exit unless specified otherwise
@@ -208,7 +210,6 @@ int main(int argc, char *argv[]) {
 		}
 
 		// input
-		bool no_input = first; // consume any buffered input at the start of the program
 		while (true) {
 			struct pollfd pollfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
 			int poll_res = poll(&pollfd, 1, 0);
@@ -220,7 +221,7 @@ int main(int argc, char *argv[]) {
 			if (ferror(stdin)) ERROR(6, "Error in stdin\n");
 
 			int c = fgetc(stdin);
-			if (no_input) continue;
+			if (no_input) continue; // consume any buffered input at the start of the program
 			if (c == 'q') {
 				// quit
 				exit_code = 0;
@@ -269,9 +270,7 @@ int main(int argc, char *argv[]) {
 		if (do_toggle_pause || do_pause) {
 			if (paused && do_toggle_pause) {
 				// resume
-				if (clock_gettime(CLOCK_REALTIME, &date_now) == -1)
-					ERROR(1, "clock_gettime: %s\n", strerror(errno));
-				target_date = diff_cmp < 0 ? add_timespec(date_now, diff_time) : subtract_timespec(date_now, diff_time);
+				recalculate_time = true;
 				paused = false;
 				do_redraw = true;
 			} else if (!paused) {
@@ -281,6 +280,13 @@ int main(int argc, char *argv[]) {
 			}
 			do_toggle_pause = false;
 			do_pause = false;
+		}
+
+		if (recalculate_time) {
+			if (clock_gettime(CLOCK_REALTIME, &date_now) == -1)
+				ERROR(1, "clock_gettime: %s\n", strerror(errno));
+			target_date = diff_cmp < 0 ? add_timespec(date_now, diff_time) : subtract_timespec(date_now, diff_time);
+			recalculate_time = false;
 		}
 
 		if (do_redraw) {
@@ -296,9 +302,9 @@ int main(int argc, char *argv[]) {
 			do_redraw = false;
 
 			if (!paused) {
-				itimer.it_value.tv_usec = (diff_time.tv_nsec / 1000) % TIMER_PRECISION_USEC;                // the time until the next multiple of TIMER_PRECISION_USEC
-				if (diff_cmp > 0) itimer.it_value.tv_usec = TIMER_PRECISION_USEC - itimer.it_value.tv_usec; // negate depending if we're counting down or up
-				if (itimer.it_value.tv_usec <= 0) itimer.it_value.tv_usec = 1;                              // just in case
+				itimer.it_value.tv_usec = (diff_time.tv_nsec / 1000) % TIMER_PRECISION_USEC;                    // the time until the next multiple of TIMER_PRECISION_USEC
+				if (diff_cmp > 0) itimer.it_value.tv_usec = TIMER_PRECISION_USEC - 1 - itimer.it_value.tv_usec; // negate depending if we're counting down or up
+				if (itimer.it_value.tv_usec <= 0) itimer.it_value.tv_usec = 1;                                  // just in case
 
 				// redraw after TIMER_PRECISION_USEC has elapsed
 				if (setitimer(ITIMER_REAL, &itimer, NULL) != 0)
@@ -307,6 +313,8 @@ int main(int argc, char *argv[]) {
 
 			do_redraw = false;
 		}
+
+		no_input = false;
 	}
 
 	exit_code = 0;
