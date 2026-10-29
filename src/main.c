@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <errno.h>
 #include <signal.h>
 
@@ -47,7 +49,7 @@ int main(int argc, char *argv[]) {
 	                                 NULL)) != -1;) {
 		switch (opt) {
 			case 'h':
-				printf("Usage: %s [OPTION] <target time>...\n", argv[0]);
+				printf("Usage: %s [<option>...] [<target time>]\n", argv[0]);
 				printf("\n"
 				       "target time: see DATE STRING in date(1), or info '(coreutils) Date input formats'\n"
 				       "Counts down if the target time is in the future, counts up if the time is in the past\n"
@@ -101,14 +103,14 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if (optind != argc - 1 || invalid) {
+	if ((optind != argc - 1 && optind != argc) || invalid) {
 	invalid:
 		eprintf("Invalid usage, try --help\n");
 		return 2;
 	}
 
 	// parse target time
-	const char *target_str = argv[optind];
+	const char *target_str = optind == argc - 1 ? argv[optind] : NULL;
 	struct timespec target_date;
 	bool is_relative;
 	if (!parse_time_str(target_str, &target_date, &is_relative)) {
@@ -139,7 +141,11 @@ int main(int argc, char *argv[]) {
 			case SIGCONT:
 				break;
 			default:
-				signal(sig, handle_signal);
+				if (signal(sig, handle_signal) == SIG_ERR && errno != EINVAL) {
+					// we might try to listen to signals that don't exist and fail, so ignore EINVAL
+					eprintf("signal: %s: %s\n", strsignal(sig), strerror(errno));
+					return 9;
+				}
 		}
 	}
 
@@ -213,9 +219,12 @@ int main(int argc, char *argv[]) {
 		while (true) {
 			struct pollfd pollfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
 			int poll_res = poll(&pollfd, 1, 0);
-			if (poll_res <= 0) break;
-			if (poll_res == -1)
+			if (poll_res == 0) break;
+			if (poll_res == -1) {
+				// ignore interrupted system call from signal handler
+				if (errno == EINTR) break;
 				ERROR(1, "poll: %s\n", strerror(errno));
+			}
 
 			if (feof(stdin)) break;
 			if (ferror(stdin)) ERROR(6, "Error in stdin\n");
@@ -298,7 +307,7 @@ int main(int argc, char *argv[]) {
 
 			struct tm *timeinfo;
 			timeinfo = localtime(&date_now.tv_sec);
-			printf("%s - diff: %03i.%09i - counting %s\r\n", paused ? "paused" : "active", diff_time.tv_sec, diff_time.tv_nsec, diff_cmp > 0 ? "up" : "down");
+			printf("%s - diff: %03" PRIdLEAST64 ".%09" PRIdLEAST32 " - counting %s\r\n", paused ? "paused" : "active", (int_least64_t) diff_time.tv_sec, (int_least32_t) diff_time.tv_nsec, diff_cmp > 0 ? "up" : "down");
 			do_redraw = false;
 
 			if (!paused) {

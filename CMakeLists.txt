@@ -10,16 +10,17 @@ set(sources
 	parse_time_str.c
 	display.c
 	timespec_math.c
+	io.c
 )
 list(TRANSFORM sources PREPEND src/)
 
-# list(APPEND sources ${PROJECT_BINARY_DIR}/parse-datetime.c)
-# set(GNULIB_DIR gnulib/lib)
-# find_package(BISON REQUIRED)
-# find_package(PkgConfig REQUIRED)
-# pkg_check_modules(GNULIB REQUIRED IMPORTED_TARGET gnulib)
-# target_link_libraries(timer PkgConfig::GNULIB)
-# add_dependencies(timer PkgConfig::gnulib)
+find_program(DATE_BIN_PATH date REQUIRED)
+add_compile_definitions(DATE_BIN_PATH=${DATE_BIN_PATH})
+message("Date path: " ${DATE_BIN_PATH})
+
+find_program(FIGLET_BIN_PATH figlet REQUIRED)
+add_compile_definitions(FIGLET_BIN_PATH=${FIGLET_BIN_PATH})
+message("Figlet path: " ${FIGLET_BIN_PATH})
 
 add_executable(timer ${sources})
 
