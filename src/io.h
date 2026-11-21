@@ -1,6 +1,7 @@
-#ifndef CHILD_PROCESS_H
-#define CHILD_PROCESS_H
+#ifndef IO_H
+#define IO_H
 #include <stddef.h>
+#include <stdbool.h>
 #include <signal.h>
 
 typedef void (*fork_io_child_func)(int parent_stdout_fd, int parent_stderr_fd, void *child_ctx);

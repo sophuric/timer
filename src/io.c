@@ -227,8 +227,8 @@ static int read_stdout(int stdin_fd, int stdout_fd, int stderr_fd, pid_t pid, vo
 		eprintf(__VA_ARGS__); \
 		return false;         \
 	}
-bool fork_execvp_read_stdout(const char *file, char *const *argv, void *out, size_t out_size, size_t *read_size) {
-	struct read_stdout_ctx ctx = {.buf = out, .left = out_size};
+bool fork_execvp_read_stdout(const char *file, char *const *argv, void *out, size_t out_buf_size, size_t *read_size) {
+	struct read_stdout_ctx ctx = {.buf = out, .left = out_buf_size};
 
 	int wstatus;
 	int res = fork_execvp(file, argv, read_stdout, &ctx, &wstatus);
@@ -238,7 +238,7 @@ bool fork_execvp_read_stdout(const char *file, char *const *argv, void *out, siz
 	if (!WIFEXITED(wstatus)) ERROR("Process is in unknown state\n");
 	if (WEXITSTATUS(wstatus)) ERROR("Process exited with status: %i\n", WEXITSTATUS(wstatus));
 
-	if (read_size) *read_size = out_size - ctx.left;
+	if (read_size) *read_size = out_buf_size - ctx.left;
 
 	return true;
 }

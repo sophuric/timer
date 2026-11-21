@@ -1,13 +1,10 @@
 #include "parse_time_str.h"
 #include "timespec_math.h"
-
 #include "io.h"
 
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
-#include <errno.h>
-#include <signal.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -20,7 +17,6 @@ static bool call_date(const char *str, struct timespec *out) {
 	if (!str) str = "now";
 	static char *const path = STR(DATE_BIN_PATH);
 	char *const argv[] = {path, "+%s;%N", "--date", (char *) str, NULL};
-	int wstatus;
 
 	char buf[257] = {0};
 	size_t buf_size;
