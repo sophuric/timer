@@ -166,6 +166,9 @@ int main(int argc, char *argv[]) {
 	struct timespec diff_time;
 
 	bool no_input = true;
+	bool recalculate_diff = paused;
+
+	do_suspend = false;
 
 	// main loop
 	while (true) {
@@ -182,36 +185,37 @@ int main(int argc, char *argv[]) {
 			goto exit;
 		}
 
-		if (!paused) {
+		if (!paused || recalculate_diff) {
 			if (clock_gettime(CLOCK_REALTIME, &date_now) == -1)
 				ERROR(1, "clock_gettime: %s\n", strerror(errno));
 			prev_diff_cmp = diff_cmp;
-			diff_cmp = compare_timespec(date_now, target_date);
+			diff_cmp = compare_timespec(date_now, target_date); // -1 if counting down, +1 if counting up
 			diff_time = subtract_timespec(date_now, target_date);
-			if (prev_diff_cmp == -2) prev_diff_cmp = diff_cmp;
+			if (prev_diff_cmp == -2) prev_diff_cmp = diff_cmp; // set to current if previous is not set properly yet (initially -2)
+			recalculate_diff = false;
+		}
 
-			// detect when countdown hits zero
-			if (diff_cmp >= 0 && prev_diff_cmp < 0) {
-				if (expire_command) {
-					// run command
-					if (!set_display(&display, false)) return 5;
-					int system_res = system(expire_command);
-					if (system_res == -1)
-						ERROR(1, "system: %s: %s\n", expire_command, strerror(errno));
-					if (!keep_going) {
-						// exit after expiring, setting exit code to the program's exit code
-						exit_code = system_res;
-						goto exit;
-					}
-					if (!set_display(&display, true)) return 5;
-					recalculate_time = true;
-					no_input = true;
-				}
+		// detect when countdown hits zero
+		if (!paused && diff_cmp >= 0 && prev_diff_cmp < 0) {
+			if (expire_command) {
+				// run command
+				if (!set_display(&display, false)) return 5;
+				int system_res = system(expire_command);
+				if (system_res == -1)
+					ERROR(1, "system: %s: %s\n", expire_command, strerror(errno));
 				if (!keep_going) {
-					// exit unless specified otherwise
-					exit_code = 0;
+					// exit after expiring, setting exit code to the program's exit code
+					exit_code = system_res;
 					goto exit;
 				}
+				if (!set_display(&display, true)) return 5;
+				recalculate_time = true;
+				no_input = true;
+			}
+			if (!keep_going) {
+				// exit unless specified otherwise
+				exit_code = 0;
+				goto exit;
 			}
 		}
 
@@ -238,7 +242,6 @@ int main(int argc, char *argv[]) {
 			}
 			if (allow_control) {
 				switch (c) {
-					case 'q':
 					case ' ':
 						do_toggle_pause = true;
 						goto no_set;
@@ -272,7 +275,7 @@ int main(int argc, char *argv[]) {
 				// set new target date
 				target_date = diff_cmp < 0 ? add_timespec(date_now, diff_time) : subtract_timespec(date_now, diff_time);
 				do_redraw = true;
-			no_set:
+			no_set:;
 			}
 		}
 
