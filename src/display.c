@@ -6,7 +6,7 @@
 
 #define dsprintf(...) dprintf(state->fd, __VA_ARGS__)
 
-#define DEBUG_DISPLAY
+// #define DEBUG_DISPLAY
 
 bool set_display(struct display_state *state, bool enabled) {
 	if (enabled == state->enabled) return true;

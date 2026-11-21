@@ -11,6 +11,7 @@ set(sources
 	display.c
 	timespec_math.c
 	io.c
+	draw_text.c
 )
 list(TRANSFORM sources PREPEND src/)
 
@@ -23,5 +24,14 @@ add_compile_definitions(FIGLET_BIN_PATH=${FIGLET_BIN_PATH})
 message("Figlet path: " ${FIGLET_BIN_PATH})
 
 add_executable(timer ${sources})
+
+add_compile_options(
+	-Wall
+	-Werror
+	-fsanitize=address
+)
+add_link_options(
+	-fsanitize=address
+)
 
 include(ExternalProject)

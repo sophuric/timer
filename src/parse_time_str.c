@@ -21,7 +21,7 @@ static bool call_date(const char *str, struct timespec *out) {
 	char buf[257] = {0};
 	size_t buf_size;
 
-	if (!fork_execvp_read_stdout(path, argv, buf, sizeof(buf) / sizeof(*buf) - 1, &buf_size)) return false;
+	if (!fork_execvp_read_stdout(path, argv, buf, sizeof(buf) / sizeof(*buf) - 1, &buf_size, true)) return false;
 
 	buf[buf_size] = '\0';
 

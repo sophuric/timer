@@ -12,5 +12,5 @@ int fork_execve(const char *path, char *const *argv, char *const *envp, fork_io_
 int fork_execvp(const char *file, char *const *argv, fork_io_parent_func parent_func, void *parent_ctx, int *wstatus);
 int fork_execv(const char *path, char *const *argv, fork_io_parent_func parent_func, void *parent_ctx, int *wstatus);
 
-bool fork_execvp_read_stdout(const char *file, char *const *argv, void *out, size_t out_size, size_t *read_size);
+bool fork_execvp_read_stdout(const char *file, char *const *argv, void *out, size_t out_buf_size, size_t *read_size, bool output_error);
 #endif

@@ -10,8 +10,10 @@
 #include <inttypes.h>
 #include <errno.h>
 #include <signal.h>
+#include <sys/ioctl.h>
 
 #include "display.h"
+#include "draw_text.h"
 #include "parse_time_str.h"
 #include "timespec_math.h"
 
@@ -30,27 +32,38 @@ static struct itimerval itimer = {
 
 #define TIMER_PRECISION_USEC (1000000)
 
+bool time_to_str(struct timespec time, char *out, size_t out_len);
+
+static char *default_font = "univers";
+static char *default_date_format = "%c";
+
 int main(int argc, char *argv[]) {
 	bool invalid = false;
 	bool keep_going = false, allow_control = false, disallow_control = false, paused = false;
 	char *expire_command = NULL;
+	char *font = default_font;
+	char *date_format = default_date_format;
+	bool set_title = true;
 
 	// argument handling
-	for (int opt; (opt = getopt_long(argc, argv, ":hVkpPdc:", (struct option[]) {
-	                                                                  {"help",           no_argument,       0, 'h'},
-	                                                                  {"version",        no_argument,       0, 'V'},
-	                                                                  {"keep-going",     no_argument,       0, 'k'},
-	                                                                  {"allow-pause",    no_argument,       0, 'p'},
-	                                                                  {"disallow-pause", no_argument,       0, 'P'},
-	                                                                  {"start-paused",   no_argument,       0, 'd'},
-	                                                                  {"command",        required_argument, 0, 'c'},
-	                                                                  {0,                0,                 0, 0  }
+	for (int opt; (opt = getopt_long(argc, argv, ":hVkpPdc:f:FTD:", (struct option[]) {
+	                                                                        {"help",           no_argument,       0, 'h'},
+	                                                                        {"version",        no_argument,       0, 'V'},
+	                                                                        {"keep-going",     no_argument,       0, 'k'},
+	                                                                        {"allow-pause",    no_argument,       0, 'p'},
+	                                                                        {"disallow-pause", no_argument,       0, 'P'},
+	                                                                        {"start-paused",   no_argument,       0, 'd'},
+	                                                                        {"command",        required_argument, 0, 'c'},
+	                                                                        {"font",           required_argument, 0, 'f'},
+	                                                                        {"no-font",        no_argument,       0, 'F'},
+	                                                                        {"no-set-title",   no_argument,       0, 'T'},
+	                                                                        {"date-format",    required_argument, 0, 'D'},
+	                                                                        {0,                0,                 0, 0  }
     },
 	                                 NULL)) != -1;) {
 		switch (opt) {
 			case 'h':
-				printf("Usage: %s [<option>...] [<target time>]\n", argv[0]);
-				printf("\n"
+				printf("Usage: %s [<option>...] [<target time>]\n"
 				       "target time: see DATE STRING in date(1), or info '(coreutils) Date input formats'\n"
 				       "Counts down if the target time is in the future, counts up if the time is in the past\n"
 				       "\n"
@@ -60,6 +73,10 @@ int main(int argc, char *argv[]) {
 				       "-P --disallow-control: Prevent pausing and changing time, has priority over -p\n"
 				       "-d --start-paused: Start the timer paused\n"
 				       "-c --command <command>: Run shell command when countdown hits zero\n"
+				       "-f --font <font>: Use this figlet font, default: '%s'\n"
+				       "-F --no-font: Don't use figlet to display the timer\n"
+				       "-T --no-set-title: Don't set the title to the timer\n"
+				       "-D --date-format: Date format for the target date shown below the timer, see strftime(3)\n"
 				       "\n"
 				       "If neither -p or -P is specified, pausing and changing time will only be allowed for\n"
 				       "relative times (e.g. in 42 minutes) and not absolute times (e.g. 17:23)\n"
@@ -79,7 +96,9 @@ int main(int argc, char *argv[]) {
 				       "-/j: subtract 1 second\n"
 				       "u: subtract 10 seconds\n"
 				       "n: subtract 60 seconds\n"
-				       "\n");
+				       "\n",
+				       argv[0],
+				       default_font);
 				return 0;
 			default:
 				if (invalid) break;
@@ -98,6 +117,18 @@ int main(int argc, char *argv[]) {
 						break;
 					case 'c':
 						expire_command = optarg;
+						break;
+					case 'f':
+						font = optarg;
+						break;
+					case 'F':
+						font = NULL;
+						break;
+					case 'T':
+						set_title = false;
+						break;
+					case 'D':
+						date_format = NULL;
 						break;
 					default:
 						invalid = true;
@@ -154,6 +185,12 @@ int main(int argc, char *argv[]) {
 
 	if (!set_display(&display, true)) return 5;
 
+#define ERROR_NO_MSG(code)            \
+	{                                 \
+		set_display(&display, false); \
+		exit_code = code;             \
+		goto exit;                    \
+	}
 #define ERROR(code, ...)              \
 	{                                 \
 		set_display(&display, false); \
@@ -313,10 +350,59 @@ int main(int argc, char *argv[]) {
 			if (setitimer(ITIMER_REAL, &itimer, NULL) != 0)
 				ERROR(1, "setitimer: %s\n", strerror(errno));
 
-			struct tm *timeinfo;
-			timeinfo = localtime(&date_now.tv_sec);
-			printf("%s - diff: %03" PRIdLEAST64 ".%09" PRIdLEAST32 " - counting %s\r\n", paused ? "paused" : "active", (int_least64_t) diff_time.tv_sec, (int_least32_t) diff_time.tv_nsec, diff_cmp > 0 ? "up" : "down");
-			do_redraw = false;
+#define LENGTH_OF(x) (sizeof(x) / sizeof(*(x)))
+			char *target_time_str = NULL;
+			char target_time_str_[512];
+			if (!paused) {
+				struct tm *timeinfo, timeinfo_;
+				timeinfo = localtime_r(&target_date.tv_sec, &timeinfo_);
+				if (!timeinfo) ERROR(1, "localtime: %s\n", strerror(errno));
+
+				if (strftime(target_time_str_, LENGTH_OF(target_time_str_), date_format, timeinfo) > 0)
+					target_time_str = target_time_str_;
+			} else
+				target_time_str = "Paused";
+
+			// get string of time difference
+			char diff_time_str[128];
+			if (!time_to_str(diff_time, diff_time_str, LENGTH_OF(diff_time_str))) ERROR_NO_MSG(1);
+
+			// render text with figlet
+			char *render_text = NULL;
+			char figlet_text[8192];
+			if (font) {
+				if (!render_figlet_text(diff_time_str, font, figlet_text, LENGTH_OF(figlet_text))) ERROR_NO_MSG(1);
+				render_text = figlet_text;
+			} else
+				render_text = diff_time_str;
+
+			struct draw_text_blocks_settings block_settings = {
+			        .global_offset_x = 0,
+			        .global_offset_y = 0,
+			        .global_mul_x = 0.5,
+			        .global_mul_y = 0.5,
+			        .stack_horizontal = false,
+			        .each_offset = 0,
+			        .each_align = 0.5};
+
+			const char *status_text = diff_cmp > 0 ? "Counting up" : "Counting down";
+
+			struct winsize terminal_size;
+			if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &terminal_size) != 0) ERROR(1, "ioctl: TIOCGWINSZ: %s\n", strerror(errno));
+
+			clear_screen(stdout);
+
+			size_t w = terminal_size.ws_col, h = terminal_size.ws_row;
+			if (!draw_text_blocks(stdout, DRAW_TEXTS(render_text, "\n", status_text, "\n", target_time_str), w, h, block_settings)) {
+				block_settings.each_offset = 0;
+				if (!draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str, "\n", status_text, "\n", target_time_str), w, h, block_settings)) {
+					if (!draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str, "\n", status_text), w, h, block_settings)) {
+						draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str), w, h, block_settings);
+					}
+				}
+			}
+
+			set_terminal_title(stdout, diff_time_str);
 
 			if (!paused) {
 				itimer.it_value.tv_usec = (diff_time.tv_nsec / 1000) % TIMER_PRECISION_USEC;                    // the time until the next multiple of TIMER_PRECISION_USEC
@@ -338,6 +424,43 @@ int main(int argc, char *argv[]) {
 exit:
 	if (!set_display(&display, false) && exit_code == 0) return 5;
 	return exit_code;
+}
+
+#undef ERROR
+#define ERROR(...)                    \
+	{                                 \
+		set_display(&display, false); \
+		eprintf(__VA_ARGS__);         \
+		return false;                 \
+	}
+
+bool time_to_str(struct timespec time, char *out, size_t out_len) {
+	if (time.tv_nsec == 0 && time.tv_sec > 0) --time.tv_sec; // if this were to somehow happen
+
+#define APPEND(...)                                                         \
+	{                                                                       \
+		int res = snprintf(&out[out_i], out_len - out_i, __VA_ARGS__);      \
+		if (res < 0) ERROR("snprintf: %s\n", strerror(errno));              \
+		if (res >= out_len - out_i) ERROR("snprintf: hit end of buffer\n"); \
+		out_i += res;                                                       \
+	}
+	size_t out_i = 0;
+
+#define UNIT(VALUE, DIGITS, PREFIX, SUFFIX, IS_LAST)                     \
+	{                                                                    \
+		if (out_i > 0) APPEND(" ");                                      \
+		int_least64_t t = time.tv_sec / (VALUE);                         \
+		time.tv_sec -= t * (VALUE);                                      \
+		if ((IS_LAST) || out_i > 0 || t > 0)                             \
+			APPEND("%s%0*" PRIdLEAST64 "%s", PREFIX, DIGITS, t, SUFFIX); \
+	}
+
+	UNIT(86400, 0, "", "d", 0);
+	UNIT(3600, 2, "", "h", 0);
+	UNIT(60, 2, "", "m", 0);
+	UNIT(1, 2, "", "s", 1);
+
+	return true;
 }
 
 static void handle_signal(int signal) {
