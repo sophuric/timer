@@ -1,5 +1,6 @@
 build
 *.bak
+*.log
 *.out
 CMakeLists.txt.user
 CMakeCache.txt
@@ -15,3 +16,4 @@ _deps
 CMakeUserPresets.json
 cmake-build-*
 .idea
+result
