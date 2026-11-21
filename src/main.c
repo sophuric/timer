@@ -148,7 +148,7 @@ int main(int argc, char *argv[]) {
 	struct timespec target_date;
 	bool is_relative;
 	if (!parse_time_str(target_str, &target_date, &is_relative)) {
-		eprintf("Could not parse time\n");
+		eprintf("Could not parse date/time\n");
 		return 3;
 	}
 
@@ -212,14 +212,14 @@ int main(int argc, char *argv[]) {
 
 	// main loop
 	while (true) {
-		bool recalculate_target_time = false;
+		bool recalculate_target_date = false;
 		if (do_suspend) {
 			if (!set_display(&display, false)) return 5; // return to normal display
 			raise(SIGSTOP);                              // suspend process
 			if (!set_display(&display, true)) return 5;  // return back to timer display
 			do_suspend = false;
 			do_redraw = true;
-			recalculate_target_time = true;
+			recalculate_target_date = true;
 			no_input = true;
 		} else if (do_exit) {
 			goto exit;
@@ -250,7 +250,7 @@ int main(int argc, char *argv[]) {
 					goto exit;
 				}
 				if (!set_display(&display, true)) return 5;
-				recalculate_target_time = true;
+				recalculate_target_date = true;
 				no_input = true;
 			}
 			if (!keep_going) {
@@ -323,7 +323,7 @@ int main(int argc, char *argv[]) {
 		if (do_toggle_pause || do_pause) {
 			if (paused && do_toggle_pause) {
 				// resume
-				recalculate_target_time = true;
+				recalculate_target_date = true;
 				paused = false;
 				do_redraw = true;
 			} else if (!paused) {
@@ -335,12 +335,12 @@ int main(int argc, char *argv[]) {
 			do_pause = false;
 		}
 
-		if (recalculate_target_time) {
+		if (recalculate_target_date) {
 			// calculate target time from current diff
 			if (clock_gettime(CLOCK_REALTIME, &date_now) == -1)
 				ERROR(1, "clock_gettime: %s\n", strerror(errno));
 			target_date = diff_cmp < 0 ? add_timespec(date_now, diff_time) : subtract_timespec(date_now, diff_time);
-			recalculate_target_time = false;
+			recalculate_target_date = false;
 		}
 
 		if (do_redraw) {
@@ -351,17 +351,17 @@ int main(int argc, char *argv[]) {
 				ERROR(1, "setitimer: %s\n", strerror(errno));
 
 #define LENGTH_OF(x) (sizeof(x) / sizeof(*(x)))
-			char *target_time_str = NULL;
-			char target_time_str_[512];
+			char *target_date_str = NULL;
+			char target_date_str_[512];
 			if (!paused) {
 				struct tm *timeinfo, timeinfo_;
 				timeinfo = localtime_r(&target_date.tv_sec, &timeinfo_);
 				if (!timeinfo) ERROR(1, "localtime: %s\n", strerror(errno));
 
-				if (strftime(target_time_str_, LENGTH_OF(target_time_str_), date_format, timeinfo) > 0)
-					target_time_str = target_time_str_;
+				if (strftime(target_date_str_, LENGTH_OF(target_date_str_), date_format, timeinfo) > 0)
+					target_date_str = target_date_str_;
 			} else
-				target_time_str = "Paused";
+				target_date_str = "Paused";
 
 			// get string of time difference
 			char diff_time_str[128];
@@ -393,9 +393,9 @@ int main(int argc, char *argv[]) {
 			clear_screen(stdout);
 
 			size_t w = terminal_size.ws_col, h = terminal_size.ws_row;
-			if (!draw_text_blocks(stdout, DRAW_TEXTS(render_text, status_text, target_time_str), w, h, block_settings)) {
+			if (!draw_text_blocks(stdout, DRAW_TEXTS(render_text, status_text, target_date_str), w, h, block_settings)) {
 				block_settings.each_offset = 0;
-				if (!draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str, status_text, target_time_str), w, h, block_settings)) {
+				if (!draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str, status_text, target_date_str), w, h, block_settings)) {
 					if (!draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str, status_text), w, h, block_settings)) {
 						draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str), w, h, block_settings);
 					}
