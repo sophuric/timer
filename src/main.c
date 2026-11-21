@@ -371,7 +371,7 @@ int main(int argc, char *argv[]) {
 			char *render_text = NULL;
 			char figlet_text[8192];
 			if (font) {
-				if (!render_figlet_text(diff_time_str, font, figlet_text, LENGTH_OF(figlet_text))) ERROR_NO_MSG(1);
+				if (!render_figlet_text(diff_time_str, font, figlet_text, LENGTH_OF(figlet_text))) ERROR(1, "Failed to call figlet. Invalid font?\n");
 				render_text = figlet_text;
 			} else
 				render_text = diff_time_str;

@@ -222,10 +222,10 @@ static int read_stdout(int stdin_fd, int stdout_fd, int stderr_fd, pid_t pid, vo
 #undef ERROR
 }
 
-#define ERROR(...)            \
-	{                         \
-		eprintf(__VA_ARGS__); \
-		return false;         \
+#define ERROR(...)                              \
+	{                                           \
+		if (output_error) eprintf(__VA_ARGS__); \
+		return false;                           \
 	}
 bool fork_execvp_read_stdout(const char *file, char *const *argv, void *out, size_t out_buf_size, size_t *read_size, bool output_error) {
 	struct read_stdout_ctx ctx = {.buf = out, .left = out_buf_size};
@@ -233,12 +233,10 @@ bool fork_execvp_read_stdout(const char *file, char *const *argv, void *out, siz
 	int wstatus;
 	int res = fork_execvp(file, argv, read_stdout, &ctx, &wstatus);
 
-	if (output_error) {
-		if (res != 0) ERROR("Failed to start process\n");
-		if (WIFSIGNALED(wstatus)) ERROR("Process was killed with signal: %s\n", strsignal(WTERMSIG(wstatus)));
-		if (!WIFEXITED(wstatus)) ERROR("Process is in unknown state\n");
-		if (WEXITSTATUS(wstatus)) ERROR("Process exited with status: %i\n", WEXITSTATUS(wstatus));
-	}
+	if (res != 0) ERROR("Failed to start process\n");
+	if (WIFSIGNALED(wstatus)) ERROR("Process was killed with signal: %s\n", strsignal(WTERMSIG(wstatus)));
+	if (!WIFEXITED(wstatus)) ERROR("Process is in unknown state\n");
+	if (WEXITSTATUS(wstatus)) ERROR("Process exited with status: %i\n", WEXITSTATUS(wstatus));
 
 	if (read_size) *read_size = out_buf_size - ctx.left;
 
