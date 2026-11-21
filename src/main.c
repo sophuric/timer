@@ -81,6 +81,8 @@ int main(int argc, char *argv[]) {
 				       "If neither -p or -P is specified, pausing and changing time will only be allowed for\n"
 				       "relative times (e.g. in 42 minutes) and not absolute times (e.g. 17:23)\n"
 				       "\n"
+				       "If target time is omitted, the program starts counting up from now\n"
+				       "\n"
 				       "Signals:\n"
 				       "SIGUSR1: pauses the timer if it is active\n"
 				       "SIGUSR2: toggles pause/resume\n"
@@ -143,25 +145,33 @@ int main(int argc, char *argv[]) {
 		return 2;
 	}
 
-	// parse target time
-	const char *target_str = optind == argc - 1 ? argv[optind] : NULL;
 	struct timespec target_date;
 	bool is_relative;
-	if (!parse_time_str(target_str, &target_date, &is_relative)) {
-		eprintf("Could not parse date/time\n");
-		return 3;
-	}
 
-	if (disallow_control)
-		allow_control = false;
-	else if (is_relative)
-		allow_control = true;
+	// parse target date
+	const char *target_str = optind == argc - 1 ? argv[optind] : NULL;
+	if (target_str != NULL) {
+		if (!parse_time_str(target_str, &target_date, &is_relative)) {
+			eprintf("Could not parse date/time\n");
+			return 3;
+		}
+	}
 
 	struct timespec date_now;
 	if (clock_gettime(CLOCK_REALTIME, &date_now) == -1) {
 		eprintf("clock_gettime: %s\n", strerror(errno));
 		return 4;
 	}
+
+	if (target_str == NULL) {
+		target_date = date_now;
+		is_relative = true;
+	}
+
+	if (disallow_control)
+		allow_control = false;
+	else if (is_relative)
+		allow_control = true;
 
 	// handle exit
 	for (int sig = 1; sig < NSIG; ++sig) {
