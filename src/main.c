@@ -382,7 +382,7 @@ int main(int argc, char *argv[]) {
 			        .global_mul_x = 0.5,
 			        .global_mul_y = 0.5,
 			        .stack_horizontal = false,
-			        .each_offset = 0,
+			        .each_offset = 1,
 			        .each_align = 0.5};
 
 			const char *status_text = diff_cmp > 0 ? "Counting up" : "Counting down";
@@ -393,10 +393,10 @@ int main(int argc, char *argv[]) {
 			clear_screen(stdout);
 
 			size_t w = terminal_size.ws_col, h = terminal_size.ws_row;
-			if (!draw_text_blocks(stdout, DRAW_TEXTS(render_text, "\n", status_text, "\n", target_time_str), w, h, block_settings)) {
+			if (!draw_text_blocks(stdout, DRAW_TEXTS(render_text, status_text, target_time_str), w, h, block_settings)) {
 				block_settings.each_offset = 0;
-				if (!draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str, "\n", status_text, "\n", target_time_str), w, h, block_settings)) {
-					if (!draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str, "\n", status_text), w, h, block_settings)) {
+				if (!draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str, status_text, target_time_str), w, h, block_settings)) {
+					if (!draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str, status_text), w, h, block_settings)) {
 						draw_text_blocks(stdout, DRAW_TEXTS(diff_time_str), w, h, block_settings);
 					}
 				}
