@@ -172,20 +172,21 @@ int main(int argc, char *argv[]) {
 
 	// main loop
 	while (true) {
-		bool recalculate_time = false;
+		bool recalculate_target_time = false;
 		if (do_suspend) {
 			if (!set_display(&display, false)) return 5; // return to normal display
 			raise(SIGSTOP);                              // suspend process
 			if (!set_display(&display, true)) return 5;  // return back to timer display
 			do_suspend = false;
 			do_redraw = true;
-			recalculate_time = true;
+			recalculate_target_time = true;
 			no_input = true;
 		} else if (do_exit) {
 			goto exit;
 		}
 
 		if (!paused || recalculate_diff) {
+			// calculate diff from current time
 			if (clock_gettime(CLOCK_REALTIME, &date_now) == -1)
 				ERROR(1, "clock_gettime: %s\n", strerror(errno));
 			prev_diff_cmp = diff_cmp;
@@ -209,7 +210,7 @@ int main(int argc, char *argv[]) {
 					goto exit;
 				}
 				if (!set_display(&display, true)) return 5;
-				recalculate_time = true;
+				recalculate_target_time = true;
 				no_input = true;
 			}
 			if (!keep_going) {
@@ -282,7 +283,7 @@ int main(int argc, char *argv[]) {
 		if (do_toggle_pause || do_pause) {
 			if (paused && do_toggle_pause) {
 				// resume
-				recalculate_time = true;
+				recalculate_target_time = true;
 				paused = false;
 				do_redraw = true;
 			} else if (!paused) {
@@ -294,11 +295,12 @@ int main(int argc, char *argv[]) {
 			do_pause = false;
 		}
 
-		if (recalculate_time) {
+		if (recalculate_target_time) {
+			// calculate target time from current diff
 			if (clock_gettime(CLOCK_REALTIME, &date_now) == -1)
 				ERROR(1, "clock_gettime: %s\n", strerror(errno));
 			target_date = diff_cmp < 0 ? add_timespec(date_now, diff_time) : subtract_timespec(date_now, diff_time);
-			recalculate_time = false;
+			recalculate_target_time = false;
 		}
 
 		if (do_redraw) {
