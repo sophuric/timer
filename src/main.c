@@ -68,7 +68,7 @@ int main(int argc, char *argv[]) {
 				       "Counts down if the target time is in the future, counts up if the time is in the past\n"
 				       "\n"
 				       "-h --help: Shows help text\n"
-				       "-k --keep-going: Don't exit after count down expires\n"
+				       "-k --keep-going: Don't exit after count down expires, and start counting up\n"
 				       "-p --allow-control: Allow pausing and changing time\n"
 				       "-P --disallow-control: Prevent pausing and changing time, has priority over -p\n"
 				       "-d --start-paused: Start the timer paused\n"
