@@ -428,6 +428,8 @@ int main(int argc, char *argv[]) {
 		}
 
 		no_input = false;
+
+		usleep(1000); // 1 ms, to reduce CPU usage
 	}
 
 	exit_code = 0;
