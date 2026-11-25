@@ -199,9 +199,12 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if (!set_display(&display, true)) return 5;
+	size_t figlet_text_size = 0100000;
+	char *figlet_text = malloc(figlet_text_size);
+	if (!figlet_text) ERROR(1, "malloc: %s\n", strerror(errno));
 
 #undef ERROR
+	if (!set_display(&display, true)) return 5;
 #define ERROR(code, ...)              \
 	{                                 \
 		set_display(&display, false); \
@@ -384,9 +387,8 @@ int main(int argc, char *argv[]) {
 
 			// render text with figlet
 			char *render_text = NULL;
-			char figlet_text[8192];
 			if (font) {
-				if (!render_figlet_text(diff_time_str, font, figlet_text, LENGTH_OF(figlet_text))) ERROR(1, "Failed to call figlet. Invalid font?\n");
+				if (!render_figlet_text(diff_time_str, font, figlet_text, figlet_text_size)) ERROR(1, "Failed to call figlet. Invalid font?\n");
 				render_text = figlet_text;
 			} else
 				render_text = diff_time_str;
@@ -439,6 +441,7 @@ int main(int argc, char *argv[]) {
 
 	exit_code = 0;
 exit:
+	if (figlet_text) free(figlet_text);
 	if (!set_display(&display, false) && exit_code == 0) return 5;
 	return exit_code;
 }
