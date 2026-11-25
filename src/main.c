@@ -412,7 +412,7 @@ int main(int argc, char *argv[]) {
 				}
 			}
 
-			set_terminal_title(stdout, diff_time_str);
+			if (set_title) set_terminal_title(stdout, diff_time_str);
 
 			if (!paused) {
 				itimer.it_value.tv_usec = (diff_time.tv_nsec / 1000) % TIMER_PRECISION_USEC;                    // the time until the next multiple of TIMER_PRECISION_USEC
