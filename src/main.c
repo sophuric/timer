@@ -38,6 +38,11 @@ static char *default_font = "univers";
 static char *default_date_format = "%c";
 
 int main(int argc, char *argv[]) {
+#define ERROR(code, ...)      \
+	{                         \
+		eprintf(__VA_ARGS__); \
+		return code;          \
+	}
 	bool invalid = false;
 	bool keep_going = false, allow_control = false, disallow_control = false, paused = false;
 	char *expire_command = NULL;
@@ -130,7 +135,7 @@ int main(int argc, char *argv[]) {
 						set_title = false;
 						break;
 					case 'D':
-						date_format = NULL;
+						date_format = optarg;
 						break;
 					default:
 						invalid = true;
@@ -139,11 +144,17 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if ((optind != argc - 1 && optind != argc) || invalid) {
+	if ((optind != argc - 1 && optind != argc) || invalid)
 	invalid:
-		eprintf("Invalid usage, try --help\n");
-		return 2;
-	}
+		ERROR(2, "Invalid usage, try --help\n");
+
+	static const char date_format_prefix_char = '.';
+	size_t date_format_len = strlen(date_format);
+	if (date_format_len > 512) ERROR(1, "Date format too long\n");
+	char date_format_prefixed[date_format_len + 8];
+	date_format_prefixed[0] = date_format_prefix_char; // prefix with random character
+	memcpy(&date_format_prefixed[1], date_format, date_format_len);
+	date_format_prefixed[date_format_len + 1] = '\0';
 
 	struct timespec target_date;
 	bool is_relative;
@@ -151,17 +162,13 @@ int main(int argc, char *argv[]) {
 	// parse target date
 	const char *target_str = optind == argc - 1 ? argv[optind] : NULL;
 	if (target_str != NULL) {
-		if (!parse_time_str(target_str, &target_date, &is_relative)) {
-			eprintf("Could not parse date/time\n");
-			return 3;
-		}
+		if (!parse_time_str(target_str, &target_date, &is_relative))
+			ERROR(3, "Could not parse date/time\n");
 	}
 
 	struct timespec date_now;
-	if (clock_gettime(CLOCK_REALTIME, &date_now) == -1) {
-		eprintf("clock_gettime: %s\n", strerror(errno));
-		return 4;
-	}
+	if (clock_gettime(CLOCK_REALTIME, &date_now) == -1)
+		ERROR(4, "clock_gettime: %s\n", strerror(errno));
 
 	if (target_str == NULL) {
 		target_date = date_now;
@@ -187,20 +194,14 @@ int main(int argc, char *argv[]) {
 			default:
 				if (signal(sig, handle_signal) == SIG_ERR && errno != EINVAL) {
 					// we might try to listen to signals that don't exist and fail, so ignore EINVAL
-					eprintf("signal: %s: %s\n", strsignal(sig), strerror(errno));
-					return 9;
+					ERROR(9, "signal: %s: %s\n", strsignal(sig), strerror(errno));
 				}
 		}
 	}
 
 	if (!set_display(&display, true)) return 5;
 
-#define ERROR_NO_MSG(code)            \
-	{                                 \
-		set_display(&display, false); \
-		exit_code = code;             \
-		goto exit;                    \
-	}
+#undef ERROR
 #define ERROR(code, ...)              \
 	{                                 \
 		set_display(&display, false); \
@@ -368,14 +369,18 @@ int main(int argc, char *argv[]) {
 				timeinfo = localtime_r(&target_date.tv_sec, &timeinfo_);
 				if (!timeinfo) ERROR(1, "localtime: %s\n", strerror(errno));
 
-				if (strftime(target_date_str_, LENGTH_OF(target_date_str_), date_format, timeinfo) > 0)
-					target_date_str = target_date_str_;
+				errno = 0;
+				if (strftime(target_date_str_, LENGTH_OF(target_date_str_), date_format_prefixed, timeinfo) <= 0)
+					ERROR(1, "strftime: %s\n", errno ? strerror(errno) : "Exceeds max bytes or blank date format");
+
+				target_date_str = target_date_str_;
+				if (*target_date_str == date_format_prefix_char) ++target_date_str;
 			} else
 				target_date_str = "Paused";
 
 			// get string of time difference
 			char diff_time_str[128];
-			if (!time_to_str(diff_time, diff_time_str, LENGTH_OF(diff_time_str))) ERROR_NO_MSG(1);
+			if (!time_to_str(diff_time, diff_time_str, LENGTH_OF(diff_time_str))) ERROR(1, "");
 
 			// render text with figlet
 			char *render_text = NULL;
