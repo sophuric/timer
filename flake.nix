@@ -2,7 +2,7 @@
   description = "C countdown/stopwatch program";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.zst";
   };
   outputs =
     { nixpkgs, ... }:
